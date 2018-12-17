@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="http://d3js.org/d3.v3.min.js"></script>
+  <script src='https://npmcdn.com/@turf/turf/turf.min.js'></script>
+    <style>
+
+    div.timescale {
+        position: fixed;
+        top: 100px;
+        left: 30px;
+      }
+
+    div.timescale div {
+        background-color: rgb(251,201,127);
+        padding: 3px;
+        margin: 7px;
+      }
+
+    
+
+    h2 {
+      top: 20;
+      left: 200;
+      text-align: center;
+      alignment-baseline: central;
+    }
+
+
+    h3 {
+      top: 40;
+      left: 200;
+      text-align: center;
+      alignment-baseline: central;
+    }
+    
+
+
+    </style>
+    <script type="text/javascript">
+      function draw(geojsonData) {
+        /*
+        main function to render the map of munich with district resolution (border for each district displayed). takes geojson data as input and invokes d3 data join
+        to incorporate the data.   
+
+        geojsonData: polygon coordinates for each district of munich (object; geojson)
+        */
+
+        // extract geographical center coordinates for each district
+        var centerCoords = {}
+        var centerCoordsList = [] 
+          for(var i=0; i < geojsonData.features.length; ++i) {
+            var coordsProjected = []
+            for(var ii=0; ii < geojsonData.features[i].geometry.coordinates[0].length; ++ii) {
+              var coord = geojsonData.features[i].geometry.coordinates[0][ii]
+              coordsProjected.push( turf.point(projection([coord[0], coord[1]]) ) )
+            };
+            
+            var features = turf.featureCollection(coordsProjected);
+            var center = turf.center(features);
+            //debugger
+            centerCoordsList.push({"name":geojsonData.features[i].properties.name, "x":center.geometry.coordinates[0], "y":center.geometry.coordinates[1], "value":10})
+            var properties = {"x":center.geometry.coordinates[0], "y":center.geometry.coordinates[1], "value":10}
+            centerCoords[geojsonData.features[i].properties.name] = properties          
+        };    
+             
+
+        // path generator; converts GeoJSON object into a SVG path string                       
+        var path = d3.geo.path()
+                         .projection(projection);  
+
+
+        // use d3 data join to append the polygon for each district (array with latitude/longitude coordinates)      
+        var map = svg.selectAll("path") 
+                    .data(geojsonData["features"])
+                    .enter()
+                    .append("path")
+                    .attr("d", path)
+                    .style("fill", "lightBlue")
+                    .style("stroke", "white")
+                    .style("stroke-width", 0.5)
+                    .attr("transform", function(d){return "scale(1, 1.4)"})
+                    .text(function(d) {return d.properties.name});     
+
+        // load the dataset that contains information on visitor inflow and outflow during the oktoberfest 2017
+        // dataset contains information on inflow/outflow for each weekday aggregated over the entire oktoberfest timespan 
+        //--> e.g, monday contains data from the monday during first week and second week, respectively     
+        d3.json("in_out_districts_oktoberfest_2017_timeslot_basic_english_refactored.json", timeSelect);
+
+            function updateHeader(header){
+              /*
+              Takes a string as input and updates chart sub header accordingly
+              */
+              d3.selectAll("h3")
+                .text(header)
+                .style("opacity",1);  
+            };
+
+            function timeSelect(inOutData) {
+              /*
+              this function is used to filter the proper data range, which will be used to display the information on inflow/outflow.
+              */
+              debugger;
+              var isClicked = false;   
+              //var daySelected = null; 
+              var districtSelected = null;  
+
+              var weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+              d3.select(".map")
+                .selectAll("path")
+                .filter(function() {return this.textContent=="District 02"}) 
+                .style("fill", "rgb(251,201,127)");
+
+              var idx = 0;
+              // iterate over the weekdays and display inflow and outflow for the district that hosts the Oktoberfest 
+              var weekdayInterval = setInterval(function() {
+                  var day = weekdays[idx]
+                  bar_plot(inOutData[day], day,"District 02")   
+                  updateHeader("Inflow and Outflow for the Oktoberfest area on "+day)       
+
+                  idx++;
+                  if(idx >= weekdays.length) {
+                    clearInterval(weekdayInterval);  
+
+                    // set buttons to specifically select relevant data for each day of the week
+                    var buttons = d3.select("body")
+                            .append("div")
+                            .attr("class", "timescale")
+                            .selectAll("div")
+                            .data(weekdays) // ADD BUTTONS FOR EACH DAY
+                            .enter()
+                            .append("div")
+                            .text(function(d) {return d});
+
+                    // set "Sunday" button as selected (changed coloring)  
+                    d3.select(".timescale").selectAll("div")
+                               .filter(function() {return d3.select(this).text()=="Sunday"})  
+                               .style("background", "lightBlue")
+                               .style("color", "white");        
+
+
+                    // selection operation to filter relevant data for weekday of interest
+                    buttons.on("click", function(d) {
+                              
+                          var daySelected = d
+
+                          // highlights selected button  
+                          d3.select(".timescale")
+                            .selectAll("div")
+                            .transition()
+                            .duration(500)
+                            .style("background", "rgb(251,201,127)")
+                            .style("color", "black");
+       
+                          d3.select(this)
+                            .transition()
+                            .duration(500)
+                            .style("background", "lightBlue")
+                            .style("color", "white");
+
+                          if(!isClicked){
+                            console.log("NOT CLICKED")
+                            
+                            updateHeader("Inflow and Outflow for the Oktoberfest area on "+ daySelected)
+                            bar_plot(inOutData[daySelected], daySelected, "District 02");  
+                          };  
+                          
+                          //selection operation to explicitly filter and display inflow/outflow for a city district of interest 
+                          d3.selectAll("path")
+                            .on("click", function(d) {
+
+                              districtSelected = d.properties.name  // selected district
+                              isClicked = true
+
+                              // highlights selected district
+                              d3.select(".map")
+                                .selectAll("path")
+                                .transition()
+                                .duration(200)
+                                .style("fill", "lightBlue");
+
+                              d3.select(this)
+                                .transition()
+                                .duration(500)
+                                .style("fill", "rgb(251,201,127)");
+                           
+                              updateHeader("Inflow and Outflow for "+districtSelected+" on "+daySelected)  
+                              // draw bar chart  
+                              bar_plot(inOutData[daySelected], daySelected, districtSelected);
+                            
+                            })
+                            
+                            // update bar chart if a district is selected and day
+                            if(isClicked){
+                              bar_plot(inOutData[daySelected], daySelected, districtSelected)
+                            };       
+                      }) 
+
+
+
+
+                  };
+
+              }, 1000);  
+              
+            };
+
+          function update(day, district){
+
+          };
+
+          // set scale for bar chart x axis   
+          var xScale = d3.scale.ordinal().rangeRoundBands([0, 300], .1,.2);
+          // bar chart header (displays information on selected district)     
+          var barHeader = d3.select("svg")
+                             .append("g");      
+
+          function bar_plot(inOutData, day, district){
+            debugger;
+            /*
+            function used to draw a bar chart that displays the number of inflow and outflow for a selected district. Takes the input/output dataset, selected day and
+            selected district as input and draws the bar chart for the selected day and district.
+            */
+            
+            // set colors for the bar chart 
+            var colors = ["green", "red"];   
+            // use id as the selector for the data join enter() instead of the default update via index
+            var dataset = [{"id":"in"+district+day, "type":"IN", "freq":inOutData[district].in}, {"id":"out"+district+day, "type":"OUT", "freq":inOutData[district].out}];
+
+            //map data space via domain
+            xScale.domain(dataset.map(function(d) { return d["type"]; }));
+            
+            var barPadding = 10;
+            var barWidth = (100);
+            // data join to create/update bar chart
+            var barChart = svg.selectAll("rect")
+                              .data(dataset,function(d){return d.id});
+                                          
+            barChart.exit().remove();   
+
+            barChart.enter()    
+                    .append("rect")
+                    .transition()
+                    .duration(500)
+                    .attr("y", function(d) {
+                      return height - (d.freq+300)  
+                    })
+                    .attr("height", function(d) {
+                      console.log(d.freq)
+                      if(d.freq === 0) {
+                        return 1
+                      } else {
+                        return d.freq
+                      }
+                    })
+                    .attr("width", xScale.rangeBand()) 
+                    .attr("x", function(d) { return xScale(d["type"]); })
+                    .attr("fill", function(d,i) {
+                      return colors[i]
+                    });
+                    
+            
+
+              // data join to create/update bar chart      
+              var text = svg.selectAll("text")     
+                            .data(dataset,function(d){return d.id})
+
+              text.exit().remove();   
+
+              text.enter()
+                  .append("text")
+                  .attr("class","freq")
+                  .attr("x", (function(d) { return xScale(d["type"]) + xScale.rangeBand() / 2.5 ; }  ))
+                  .attr("y", (function(d) { return height - (d["freq"]+320) }  ))
+                  .attr("dy", ".75em")
+                  .text(function(d) { return d["freq"]; })
+                  .attr("font-size", "20px");       
+
+ 
+
+              text.enter()
+                  .append("text")
+                  .attr("class","label")
+                  .attr("x", (function(d) { return xScale(d["type"]) + xScale.rangeBand() / 2.5 ; }  ))
+                  .attr("y", (function(d) { return height - 280 }  ))
+                  .attr("dy", ".75em")
+                  .text(function(d) { return d["type"]; })
+                  .attr("font-size", "20px");                         
+
+            
+
+            var names = [{"name":district}];
+            var districtName = barHeader.selectAll("text")
+                                         .data(names, function(d){return d.name});
+
+            districtName.exit().remove();
+            
+            districtName.enter()
+                         .append("text")   
+                         .attr("x", 30)
+                         .attr("y", 700)
+                         .text(function(d) {return d.name})
+                         .attr("font-size", "60px");           
+          };
+      };
+
+
+
+    </script>
+</head>
+<body>
+  
+  <script type="text/javascript">
+    
+    // set main header 
+    d3.select("body")
+              .append("h2")
+              .text("Visitor Inflow and Outflow during Oktoberfest 2017 in Munich");         
+
+    // set sub-header          
+    d3.select("body")
+              .append("h3")
+              .text("-")
+              .style("opacity",0);                       
+  
+    // define canvas size          
+    "use strict";
+    var width = 1500,
+        height = 900,
+        margin = 75;
+
+    // create svg element used to store polygon data to be displayed
+    var svg = d3.select("body")
+                .append("svg")
+                .attr("width", width)
+                .attr("height", height)
+                .append("g")
+                .attr("class", "map");
+                    
+        
+    //define projection function to properly transform and position polygons that constitute each district in munich    
+    var projection = d3.geo.albers() // transformator
+                           .center([11.5878414, 48.1331509]) // center map
+                           .rotate([-11.5878414,-48.1331509]) // rotate map
+                           .scale(198000) // zoom into map
+                           .translate([27900, -161870]); // position map on x,y axis
+
+    //load geojson dataset for munich and call draw function to render Munich with district resolution
+    d3.json("munich_districts_airport_cleaned_english.geojson", draw);
+
+  </script>
+</body>
+</html>

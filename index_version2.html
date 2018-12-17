@@ -1,0 +1,507 @@
+
+<html>
+<head>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+  <meta charset="utf-8">
+  <script src="http://d3js.org/d3.v3.min.js"></script>
+  <script src='https://npmcdn.com/@turf/turf/turf.min.js'></script>
+    <style>
+
+   
+    .header{
+      position: fixed;
+      left: 50px;
+      top: 30px;
+      font: 12px sans-serif;
+    }
+
+
+    div.timescale {
+        position: fixed;
+        top: 150px;
+        left: 30px;
+      }
+
+    div.timescale div {
+        background-color: rgb(251,201,127);
+        padding: 3px;
+        margin: 7px;
+      }
+
+    .axis text {
+      font: 10px sans-serif;
+    }
+
+    .axis path,
+    .axis line {
+      fill: none;
+      stroke: #000;
+      shape-rendering: crispEdges;
+    }
+
+    .hidden { 
+      display: none; 
+    }
+
+    div.tooltip {
+        color: #222; 
+        background: #fff; 
+        padding: .5em; 
+        text-shadow: #f5f5f5 0 1px 0;
+        border-radius: 2px; 
+        box-shadow: 0px 0px 2px 0px #a6a6a6; 
+        opacity: 0.9; 
+        position: absolute;
+        font-size:20px;
+      }
+    
+    div.container {
+        position: fixed;
+        left: 50px;
+        top: 80px;
+    }
+    
+    form {
+        left: 50px;
+        top: 30px;
+
+    }
+
+
+    h1 {
+      position: fixed;
+      top: 0;
+      left: 700;
+      font: 26px sans-serif;
+      text-align: center;
+      alignment-baseline: central;
+    }
+
+    h2 {
+      position: fixed;
+      top: 40;
+      left: 700;
+      font: 22px sans-serif;
+      text-align: center;
+      alignment-baseline: central;
+    }
+
+
+
+    </style>
+    <script type="text/javascript">
+
+      header = null
+
+      function draw(geojsonData,colorFunc,dataKey) {
+        /*
+        main function to render the map of munich with district resolution (border for each district displayed). takes geojson data as input and invokes d3 data join
+        to incorporate the data.   
+
+        geojsonData: polygon coordinates for each district of munich (object; geojson)
+        */
+        
+        d3.selectAll("h2")
+          .text(header);
+
+        svg.selectAll("path")
+           .transition()
+           .duration(500)
+           .style("fill", function(d) {
+              return colorFunc(d.properties[dataKey]) 
+           });  
+      };              
+
+
+      function addIcon(centerCoords){   
+        /*
+         Takes geographical center coordinates of districts as input and places icons corresponding to the Oktoberfest, airport and train station. 
+         Additionally, creates a legend describing the placed icons.  
+
+         centerCoords: coordinates depicting the geographical center for each munich district -latidude and longitude- (dictionary) 
+        */
+          var ICON_MAPPING = [{"id": '\uf0fc', "name" : "Oktoberfest", "x":centerCoords["District 02"]["x"]-10,"y":centerCoords["District 02"]["y"]+200, "size":35},
+                              {"id": '\uf238', "name" : "Train Station", "x":centerCoords["District 02"]["x"]-55,"y":centerCoords["District 02"]["y"]+190, "size":30},
+                              {"id": '\uf072', "name" : "Airport", "x":centerCoords["Airport Munich"]["x"],"y":centerCoords["Airport Munich"]["y"]+45, "size":40}]
+
+          for(var i=0; i<3; ++i){
+            console.log("FOR LOOP"+ICON_MAPPING[i])
+            svg.append('text')
+              .attr("x", function(d) {return ICON_MAPPING[i]["x"]})
+              .attr("y",  function(d) {return ICON_MAPPING[i]["y"]})
+              .attr('font-family', 'FontAwesome')
+              .attr('font-size', function(d){return ICON_MAPPING[i]["size"]} )
+              .text(function(d) { return ICON_MAPPING[i]["id"]});    
+          };
+
+
+          var legend = svg.append("g")
+                          .selectAll("g")
+                          .data(ICON_MAPPING, function(d){return d.id})
+                          .enter()
+                          .append('g')
+                            .attr('class', 'legend')
+                            .attr('transform', function(d, i) {
+                              var height = 50;
+                              var x = 0;
+                              var y = i * height;
+                              return 'translate(' + x + ',' + y + ')';
+                          });
+
+              
+          legend.append('text')
+                .attr('font-family', 'FontAwesome')
+                .attr('x', 10 + 10)
+                .attr('y', 700 - 10)
+                .text(function(d) { return d.id; })
+                .style("font-size", "30px");
+
+          legend.append('text')
+                .attr('x', 50 + 10)
+                .attr('y', 700 - 10)
+                .text(function(d) { return d.name; })
+                .style("font-size", "22px");     
+      };    
+      
+
+
+
+      function getRadioState() {
+        /*
+         Returns the type of flow data selected (inflow, outflow, local) via the radio buttons (returns a string)
+        */
+        var radio = document.getElementById("dimensions")
+        //var radio_val;
+        for(var i=0; i<radio.length; i++){
+          if(radio[i].checked){
+            return radio[i].id;}}
+      };
+
+
+
+      
+      function aggregate(dictionary) {
+        /*
+        Takes the dataset that contains flow frequencies for each district at a district-level and facilitates aggregation for each type of flow data (inflow, outflow, local). Returns the the aggregated value for each flow type.
+        */
+        
+        var inputAggregated = Object.values(dictionary.in);
+        var outputAggregated = Object.values(dictionary.out);
+        var localAggregated = Object.values(dictionary.local);
+        
+        return [d3.sum(inputAggregated), d3.sum(outputAggregated), d3.sum(localAggregated)];
+        };
+
+
+      function colorGradient(inOutData,radioSelected) {
+          /*
+         Takes a dataset with flow frequencies, sets the upper and lower boundaries for the heat map and returns a function that can take a frequency value as input and
+         transform it to a corresponding color with respect to the scale set. The color is returned as a string in hex color code.
+         The entire dataset is used to define upper and lower heat map boundaries. The radioSelected argument is used to only use the type of flow frequencies that
+         correspond to the flow type of interest, selected via the radio button. 
+          */
+
+          var minimumColor = "white";
+          var maximumColor = "red";  
+          var freq = [];
+         
+          let allValues = new CollectAll(inOutData,radioSelected);  
+          allValues.execute();
+          var freq = allValues.freq;
+
+          console.log("COLOR GRADIENT SUCCESS"+freq)
+          var range = d3.extent(Array(...freq)); // spread set in array (flattening)
+          var minimum = range[0];
+          var maximum = range[1];
+          debugger;
+
+          return d3.scale.linear().domain([minimum, maximum]).range([minimumColor, maximumColor]);  
+        };
+
+        class CollectAll {
+          /*
+          Takes the inflow/outflow/local dataset, aggregates the respective values for each district (each district is split into a subset that contains inflow/outflow/local values
+           for all other districts that are linked to the parent district) and returns an array of aggregated values. Providing the argument on selected type of flow (
+           inflow vs. outflow vs. local) restricts aggregation of values that correspond only to this type of flow.
+
+          in_out_data: dataset with inflow/outflow information for each district for each day (object)
+          radio_selected: identifier for the type of flow (inflow,outflow,local) selected (string)
+          */
+
+          constructor(inOutData,radioSelected) {
+            this.freq = []
+            this.radioSelected = radioSelected
+            this.inOutData = inOutData
+          }
+
+          processDistricts(day, dayInOutData){
+            /*
+            Aggregates flow (type of flow selected via this.radio_selected) for each district and adds aggregated values to freq array
+            */
+            Object.entries(dayInOutData).forEach(entry => {
+              let selected = d3.sum(Object.values(entry[1][this.radioSelected]))
+              this.freq.push(selected)
+            })
+          }
+
+          processODMatrix(){
+            /*
+            Iterates over innflow/outflow dataset and feeds the subset of each day into processDistricts method.
+            */
+            Object.entries(this.inOutData).forEach(entry => {
+             let day = entry[0] 
+             let entries = entry[1]["flow"] //take only data on mobility; 
+             let stats = entry[1]["stat"] 
+             this.processDistricts(day, entries) 
+            
+            })
+          }
+
+          execute(){
+            /*
+            Start Processing
+            */
+            this.processODMatrix()
+          }
+
+        };
+      
+
+      function updateFile(geojson) {
+        /*
+        Main function to initiate updating of the geojson input file. Updating involves adding frequency values for inflow, outflow and local for each district
+        according to selected day. Takes the geojson dataset of munich and initiates updating.
+        */
+
+          // calculates the geographical center for each district; used to add icons into districts 
+          var centerCoords = {};
+          var centerCoordsList = []; 
+          for(var i=0; i < geojson.features.length; ++i) {
+            var coordsProjected = []
+            for(var ii=0; ii < geojson.features[i].geometry.coordinates[0].length; ++ii) {
+              var coord = geojson.features[i].geometry.coordinates[0][ii]
+              debugger;
+              coordsProjected.push( turf.point(projection([coord[0], coord[1]]) ) )
+            };
+            
+            var features = turf.featureCollection(coordsProjected);
+            var center = turf.center(features);
+            centerCoordsList.push({"name":geojson.features[i].properties.name, "x":center.geometry.coordinates[0], "y":center.geometry.coordinates[1], "value":10})
+            var properties = {"x":center.geometry.coordinates[0], "y":center.geometry.coordinates[1], "value":10}
+            centerCoords[geojson.features[i].properties.name] = properties
+          
+          };   
+
+
+          // data join to add polygon data for each district required to draw the map of munich with district resolution
+          var path = d3.geo.path()
+                           .projection(projection);  
+
+          var map = svg.selectAll("path") 
+              .data(geojson["features"])
+              .enter()
+              .append("path")           
+              .attr("d", path)
+              //.style("fill", function(d) {return coloring(d.properties["in"])})
+              .style("fill", "white")
+              .style("stroke", "black")
+              .style("stroke-width", 0.5)  
+              .attr("transform", function(d){return "scale(1, 1.4)"});
+
+          // add icons and legend    
+          addIcon(centerCoords);
+              
+          // load the main dataset containing for each day of the week district-specific information on routes origin-destination 
+          d3.json("in_out_Oktoberfest_timeslots_district_resolution_incl_stats_big_set_english_refactored.json", timeSelect)
+
+              function timeSelect(inOutData) {
+                /*
+                Takes the main dataset containing information on routes origin-destination. Invokes updating of the geojson input, sets the coloring function
+                for the heat map and adds a timescale element with buttons to select a day of interest. After selecting a day of interest the heat map is updated accordingly.
+
+                in_out_data: main dataset containing for each day of the week district-specific information on routes origin-destination (object)
+                */
+
+                    debugger;
+                    // set type of flow radio button to inflow; relevant for appropriate setting of the coloring function
+                    document.getElementById('in').checked=true;
+                    var radioState = getRadioState()
+                     
+   
+                    // set aggregated heatmap coloring function; for a given type of flow, aggregated district-specific values over all days of week are used to
+                    // define the min and max value for the heat map function  
+                    var coloring = colorGradient(inOutData,radioState);  
+                    var weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+                    
+                    // iterate over the weekdays and display the cognate heatmap (with respect to flow type selected)
+                    var idx = 0;
+                    var weekdayInterval = setInterval(function() {
+                        update(inOutData, weekdays[idx],coloring)   
+                          
+                        idx++;
+
+                        if(idx >= weekdays.length) {
+                          clearInterval(weekdayInterval);
+
+                          // add timescale buttons to select day of interest
+                          var buttons = d3.select("body")
+                            .append("div")
+                            .attr("class", "timescale")
+                            .selectAll("div")
+                            .data(weekdays) // ADD BUTTONS FOR EACH DAY
+                            .enter()
+                            .append("div")
+                            .text(function(d) {return d});
+
+                          // set "Sunday" button as selected (changed coloring)  
+                          d3.select(".timescale").selectAll("div")
+                                           .filter(function() {return d3.select(this).text()=="Sunday"})  
+                                           .style("background", "lightBlue")
+                                           .style("color", "white");  
+
+                          // initiate updating of the heat map according to a day selected and type of flow selected                 
+                          buttons.on("click", function(d) {
+                          var radioState = getRadioState();
+                          var coloring = colorGradient(inOutData,radioState); 
+                           
+                          d3.select(".timescale")
+                            .selectAll("div")
+                            .transition()
+                            .duration(500)
+                            .style("background", "rgb(251,201,127)")
+                            .style("color", "black");
+
+                          d3.select(this)
+                            .transition() 
+                            .duration(500)
+                            .style("background", "lightBlue")
+                            .style("color", "white");
+
+                          //update according to selected timeframe
+                          update(inOutData,d,coloring)
+                          });     
+                                     
+                        };
+
+                      }, 1000);
+              };
+
+
+             
+
+              function update(inOutData, timeframe, coloring) {
+                /*
+                Takes the main dataset containing information on routes origin-destination, selected day of interest and the coloring function. 
+                Updates the geojson dataset to store the inflow, outflow and local routes flow information with respect to the weekday selected. 
+
+                in_out_data: main dataset containing for each day of the week district-specific information on routes origin-destination (object)
+                timeframe: selected day of interest (string)   
+                coloring: heat map coloring function (function)
+                */
+
+                var aggregatedTotal = {"Monday":{}, "Tuesday":{}, "Wednesday":{},
+                                       "Thursday":{}, "Friday":{}, "Saturday":{}, "Sunday":{}};
+                // aggregate inflow, outflow and local type of flow for each district and each weekday; used for proper tooltip display                         
+                for(day of Object.keys(inOutData)){
+                  for(name of Object.keys(inOutData[day]["flow"])) {
+                    var aggregation = aggregate(inOutData[day]["flow"][name]);
+                    aggregatedTotal[day][name] = {"in":aggregation[0], "out":aggregation[1], "local":aggregation[2]}
+                    };
+                };
+                
+                // subset for the weekday of interest
+                var inOutDataSelected = inOutData[timeframe]["flow"];
+
+                var radioState = getRadioState();   
+                // define header to display what type of data is visualized
+                var HEADER_MAPPING = {"in": "Aggregated inflow", "out": "Aggregated outflow", "local": "Local Routes"};  
+                header = HEADER_MAPPING[radioState] + " on " + timeframe   
+                         
+                // update geojson data to store information on flow frequencies
+                for(var i=0; i < geojson.features.length; i++) {
+                  
+                  var name = geojson.features[i].properties.name;
+                  var inOutAggregated = aggregate(inOutDataSelected[name]);
+                  
+                  geojson.features[i].properties["in"] = inOutAggregated[0];
+                  geojson.features[i].properties["out"] = inOutAggregated[1];
+                  geojson.features[i].properties["local"] = inOutAggregated[2];
+                  
+                  
+                };
+
+                draw(geojson,coloring,radioState);  
+
+                // invoke selector to change type of flow data 
+                var dataDim = d3.selectAll("input")
+                dataDim.on("change", function(d) {
+                  // get selected type of flow data
+                  var radioState = getRadioState();  
+                  
+                  // update header
+                  header = HEADER_MAPPING[radioState] + " on " + timeframe;  
+                   
+                  // change coloring function with respect to the type of flow selected;
+                  var coloring = colorGradient(inOutData,radioState) 
+                  
+                  // draw heat map
+                  draw(geojson,coloring,radioState)  
+                });    
+            };
+          };
+         
+    </script>
+</head>
+<body>
+  
+  
+  <form id="dimensions">
+      <input  type='radio' id="in" name="mode" value="in">Inflow</input>
+      <input type='radio' id="out" name="mode" value="out">Outflow</input> 
+      <input type='radio' id="local" name="mode" value="local">Local</input> 
+  </form>
+  
+  <script type="text/javascript">
+  
+    // define canvas size
+    "use strict";
+    var width = 1600,
+        height = 900,
+        margin = 75;
+  
+    // create svg element 
+    var svg = d3.select("body")
+                .append("svg")
+                .attr("width", width)
+                .attr("height", height)
+                .append("g")
+                .attr("class", "map");
+        
+    // set main header 
+    d3.select("body")
+              .append("h1")
+              .text("Visitor Inflow and Outflow during Oktoberfest 2017 in Munich");            
+
+    // set the header
+    d3.select("body")
+              .append("h2")
+              .text("");   
+
+    // transform/project lat,long coordinates to x,y coordinats           
+    var projection = d3.geo.albers() // transformator
+                               .center([11.5878414, 48.1331509])
+                               .rotate([-11.5878414,-48.1331509])
+                               .scale(198000) // zoom into map
+                               .translate([27600, -161870]); // position map on x,y axis
+                               
+
+    // load the geojson data and invoke drawing of the map and heat map, respectively                               
+    d3.json("munich_districts_airport_cleaned_english.geojson", updateFile);
+
+
+
+  </script>
+</body>
+</html>
+
+

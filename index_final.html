@@ -1,0 +1,886 @@
+
+<html>
+<head>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+  <meta charset="utf-8">
+  <script src="http://d3js.org/d3.v3.min.js"></script>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+  <script src='https://npmcdn.com/@turf/turf/turf.min.js'></script>
+    <style>
+
+    
+    .header{
+      position: fixed;
+      left: 50px;
+      top: 30px;
+      font: 12px sans-serif;
+    }
+
+    div.timescale {
+        position: fixed;
+        top: 150px;
+        left: 30px;
+      }
+
+    div.timescale div {
+        background-color: rgb(251,201,127);
+        padding: 3px;
+        margin: 7px;
+      }
+
+    .axis text {
+      font: 10px sans-serif;
+    }
+
+    .axis path,
+    .axis line {
+      fill: none;
+      stroke: #000;
+      shape-rendering: crispEdges;
+    }
+
+    .hidden { 
+      display: none; 
+    }
+
+    div.tooltip {
+        color: #222; 
+        background: #fff; 
+        padding: .5em; 
+        text-shadow: #f5f5f5 0 1px 0;
+        border-radius: 2px; 
+        box-shadow: 0px 0px 2px 0px #a6a6a6; 
+        opacity: 0.9; 
+        position: absolute;
+        font-size:20px;
+      }
+    
+    div.container {
+        position: fixed;
+        left: 50px;
+        top: 80px;
+    }
+    
+    form {
+        left: 50px;
+        top: 30px;
+
+    }
+
+
+    h1 {
+      position: fixed;
+      top: 0;
+      left: 700;
+      font: 26px sans-serif;
+      text-align: center;
+      alignment-baseline: central;
+    }
+
+    h2 {
+      position: fixed;
+      top: 40;
+      left: 700;
+      font: 22px sans-serif;
+      text-align: center;
+      alignment-baseline: central;
+    }
+
+
+
+    </style>
+    <script type="text/javascript">
+
+      header=null
+
+      function draw(colorFunc,dataKey,name=null) {
+        
+        d3.selectAll("h2")
+          .text(header);
+
+        svg.selectAll("path")
+           .transition()
+           .duration(500)
+           .style("fill", function(d) {
+            if(d.properties.name == name){
+              return "rgb(251,201,127)"
+            }else{
+              return colorFunc(d.properties[dataKey])
+              
+            } 
+        })  
+      };              
+
+
+      function addIcon(centerCoords){   
+        /*
+         Takes geographical center coordinates of districts as input and places icons corresponding to the Oktoberfest, airport and train station. 
+         Additionally, creates a legend describing the placed icons.  
+
+         centerCoords: coordinates depicting the geographical center for each munich district -latidude and longitude- (dictionary) 
+        */
+
+          var ICON_MAPPING = [{"id": '\uf0fc', "name" : "Oktoberfest", "x":centerCoords["District 02"]["x"]-10,"y":centerCoords["District 02"]["y"]+200, "size":35},
+                          {"id": '\uf238', "name" : "Train Station", "x":centerCoords["District 02"]["x"]-55,"y":centerCoords["District 02"]["y"]+190, "size":30},
+                          {"id": '\uf072', "name" : "Airport", "x":centerCoords["Airport Munich"]["x"],"y":centerCoords["Airport Munich"]["y"]+45, "size":40}]
+
+
+                          
+          for(var i=0; i<3; ++i){
+            console.log("FOR LOOP"+ICON_MAPPING[i])
+            svg.append('text')
+              .attr("x", function(d) {return ICON_MAPPING[i]["x"]})
+              .attr("y",  function(d) {return ICON_MAPPING[i]["y"]})
+              .attr('font-family', 'FontAwesome')
+              .attr('font-size', function(d){return ICON_MAPPING[i]["size"]} )
+              .text(function(d) { return ICON_MAPPING[i]["id"]});    
+          };
+
+          var legend = svg.append("g")
+                          .selectAll("g")
+                          .data(ICON_MAPPING, function(d){return d.id})
+                          .enter()
+                          .append('g')
+                          .attr('class', 'legend')
+                          .attr('transform', function(d, i) {
+                            var height = 50;
+                            var x = 0;
+                            var y = i * height;
+                            return 'translate(' + x + ',' + y + ')';
+                          });
+
+          legend.append('text')
+                .attr('font-family', 'FontAwesome')
+                .attr('x', 10 + 10)
+                .attr('y', 700 - 10)
+                .text(function(d) { return d.id; })
+                .style("font-size", "30px");
+
+          legend.append('text')
+                .attr('x', 50 + 10)
+                .attr('y', 700 - 10)
+                .text(function(d) { return d.name; })
+                .style("font-size", "22px");     
+      };    
+      
+
+      function toggle(button) {
+        /*
+         Function used to change attributes of the button toggle element based on predefined logic.  
+
+         this: refers to the button object itself
+        */
+          if(button.value=="OFF") {
+            document.getElementById("changeToggle").value="ON";
+            document.getElementById("changeToggle").innerHTML="ON";
+            document.getElementById("changeToggle").style.backgroundColor = "green";
+        
+          }else if(button.value=="ON") {
+            document.getElementById("changeToggle").value="OFF";
+            document.getElementById("changeToggle").innerHTML="OFF";
+            document.getElementById("changeToggle").style.backgroundColor = "red";
+          };
+      };
+
+      function getRadioState() {
+        /*
+         Returns the type of flow data selected (inflow, outflow, local) via the radio buttons (returns a string)
+        */
+
+        var radio = document.getElementById("dimensions")
+        //var radio_val;
+        for(var i=0; i<radio.length; i++){
+          if(radio[i].checked){
+            return radio[i].id;}}
+      };
+
+      function processDistricts(inOutData,radioState,aggregateCallback){
+        /*
+         Takes the dataset that contains flow frequencies for each district at a district-level (inflow/outflow frequencies from/to all other districts), invokes 
+         aggregation and returns the aggregated object for the type of flow data selected via the radio buttons. See also aggregate function description 
+
+         E.g. {"inflow" : {"district 1":{"district 2":2, "district 3":3, "district 4":10,...},
+                                           "district 2":{"district 1":4, "district 3":5, "district 4":3,...},...} } 
+         will be aggregated into: {"inflow":{"district 1" : 15, "district 2" : 12}}
+
+        inOutData: flow frequencies for each district at district-level (distionary)
+        radioState: type of flow data selected (string)
+        aggregateCallback: function to aggregate frequency values (function)
+        */
+
+
+        var aggregated = {};
+        // aggregate input output for each district; only take the appropriate aggregated subset (either input or output; selected via radio button)
+        for(key in inOutData) {
+          var range = aggregateCallback(inOutData[key])
+          DATA_MAPPING = {"in":range[0], "out":range[1], "local":range[2]} 
+          aggregated[key] = {"freq":DATA_MAPPING[radioState]}
+        };          
+        return aggregated
+      };
+
+      
+      function aggregate(dictionary) {
+        /*
+        Takes the dataset that contains flow frequencies for each district at a district-level and facilitates aggregation for each type of flow data (inflow, outflow, local). Returns the the aggregated value for each flow type.
+        */
+
+        var inputAggregated = Object.values(dictionary.in)
+        var outputAggregated = Object.values(dictionary.out)
+        var localAggregated = Object.values(dictionary.local)
+        
+        return [d3.sum(inputAggregated), d3.sum(outputAggregated), d3.sum(localAggregated)];
+        };
+
+
+      function colorGradient(inOutData,radioSelected = false, all=false) {
+        /*
+         Takes a dataset with flow frequencies, sets the upper and lower boundaries for the heat map and returns a function that can take a frequency value as input and
+         transform it to a corresponding color with respect to the scale set. The color is returned as a string in hex color code.
+         Either the entire dataset is used to define upper and lower heat map boundaries (all argument set to true), or only the values for a particular day will be 
+         considered (all argument set to true). Furthermore, if all values are considered, the radioSelected argument is used to only use the type of flow frequencies that
+         correspond to the flow type of interest, selected via the radio button. If only frequencies for a particular day are considered, the input dataset will already be
+         filtered for the type of flow frequncy selected via the radio button.
+        */
+
+          var minimumColor = "white";
+          var maximumColor = "red";  
+          var freq = [];
+         
+          if(all){
+            let allValues = new CollectAll(inOutData,radioSelected);  
+            allValues.execute()
+            var freq = allValues.freq;
+
+          } else {
+            for(let [key] of Object.entries(inOutData)){
+              if(Object.keys(inOutData[key]).indexOf("freq") == 0){ 
+               freq.push(inOutData[key].freq)
+              } else {
+                freq.push(inOutData[key])
+              }
+            };
+          };
+            
+          var range = d3.extent(Array(...freq)); // spread set in array (flattening)
+          var minimum = range[0];
+          var maximum = range[1];
+          
+          return d3.scale.linear().domain([minimum, maximum]).range([minimumColor, maximumColor]);  
+        };
+
+        class CollectAll {
+          /*
+          Takes the inflow/outflow/local dataset, aggregates the respective values for each district (each district is split into a subset that contains inflow/outflow/local values
+           for all other districts that are linked to the parent district) and returns an array of aggregated values. Providing the argument on selected type of flow (
+           inflow vs. outflow vs. local) restricts aggregation of values that correspond only to this type of flow.
+
+          Alternatively, takes the statistics object (dictionary) and returns for each statistics category (distance, duration, mode_count) an array of 
+          the respective values.  
+
+          in_out_data: either dataset with inflow/outflow information for each district for each day or statistics object for a particular day (object)
+          radio_selected: identifier for the type of flow (inflow,outflow,local) selected (string)
+          type_: type of statistic (distance, duration, mode_count) to be used for aggregation (string)
+
+          */
+
+          constructor(inOutData,radioSelected = false,type_=false) {
+            this.freq = []
+            this.stats = []
+            this.type_ = type_
+            this.radioSelected = radioSelected
+            this.inOutData = inOutData 
+          }
+
+          processDistricts(day, dayInOutData){
+            /*
+            Aggregates flow (type of flow selected via this.radio_selected) for each district and adds aggregated values to freq array
+            */
+            Object.entries(dayInOutData).forEach(entry => {
+              let selected = d3.sum(Object.values(entry[1][this.radioSelected]))
+              this.freq.push(selected)
+                
+            })
+          }
+
+          processStatistics(stats){
+            /*
+            For a statistics of interest (selected via type_) adds the respective value of each mode of transport to stats array
+            */
+            Object.values(stats[this.type_]).forEach(value => {this.stats.push(value)})
+          }
+
+          processODMatrix(){
+            /*
+            Iterates over innflow/outflow dataset and feeds the subset of each day into processDistricts method.
+            Alternatively, feeds each day's statistics subset into processStatistics method
+            */
+            Object.entries(this.inOutData).forEach(entry => {
+             let day = entry[0] 
+             let entries = entry[1]["flow"] //take only data on mobility; 
+             let stats = entry[1]["stat"] 
+             //debugger;
+             if(!this.type_){
+              this.processDistricts(day, entries) 
+            }else{
+              this.processStatistics(stats)
+            }
+            })
+          }
+
+          execute(){
+            /*
+            Start Processing
+            */
+            this.processODMatrix()
+          }
+        };
+      
+
+      function updateFile(geojson) {
+        /*
+        Main function to initiate updating of the geojson input file. Updating involves adding frequency values for inflow, outflow and local for each district
+        according to selected day. Takes the geojson dataset of munich and initiates updating.
+        */
+          
+          // calculates the geographical center for each district; used to add icons into districts 
+          var centerCoords = {}
+          var centerCoords_list = [] 
+          for(var i=0; i < geojson.features.length; ++i) {
+            var coordsProjected = []
+            for(var ii=0; ii < geojson.features[i].geometry.coordinates[0].length; ++ii) {
+              var coord = geojson.features[i].geometry.coordinates[0][ii]
+              //debugger;
+              coordsProjected.push( turf.point(projection([coord[0], coord[1]]) ) )
+              //debugger;
+            };
+            
+            var features = turf.featureCollection(coordsProjected);
+            var center = turf.center(features);
+            
+            centerCoords_list.push({"name":geojson.features[i].properties.name, "x":center.geometry.coordinates[0], "y":center.geometry.coordinates[1], "value":10})
+            var properties = {"x":center.geometry.coordinates[0], "y":center.geometry.coordinates[1], "value":10}
+            centerCoords[geojson.features[i].properties.name] = properties
+          };   
+
+          // data join to add polygon data for each district required to draw the map of munich with district resolution
+          var path = d3.geo.path()
+                           .projection(projection);  
+
+          var map = svg.selectAll("path") 
+              .data(geojson["features"])
+              .enter()
+              .append("path")           
+              .attr("d", path)
+              .style("fill", "white")
+              .style("stroke", "black")
+              .style("stroke-width", 0.5)  
+              .attr("transform", function(d){return "scale(1, 1.4)"})
+
+          // add icons and legend    
+          addIcon(centerCoords)
+                    
+          function bar_plot(inOutData,timeframe) {
+            /*
+            Takes the main dataset containing for each day flow subsets of each district and statistics information and creates barcharts to display statistics information
+            for a specified day (timeframe argument).
+
+            in_out_data: main dataset containing for each day of the week district-specific information on routes origin-destination as well as information on statistics (object)
+            timeframe: selected day of week (string)
+            */
+
+            // select statistics object for a day selected
+            timeslotStats = inOutData[timeframe]["stat"]
+            // dictionary used for normalization of statistics values    
+            var STATS_MAPPING = {"distance":{"factor":1000.},      //distance in km
+                                 "duration":{"factor":3600.},      //duration in h
+                                 "mode_count":{"factor":1}};        
+
+
+            function filterData(stats, type,timeframe) {
+              
+              /*
+              Takes a statistics object for a day of interest. Type accesses a statistic of interest (distance, duration, mode_count). For a statistics of interest
+              iterates over each mode of transport present in the dataset (car, walk, public), normalizes the cognate value using stats_MAPPING dictionary and defines a dictionary storing the type of statistics, the cognate value and an id value. The dictionary is added to the data array, which gets returned.
+              */
+              
+              var data = []
+              for(key of Object.keys(stats[type])) {
+                data.push({"id":timeframe+key,"name":key, "value":stats[type][key]/STATS_MAPPING[type]["factor"]});
+                };
+              return data
+              };
+            
+            function plot(data,type,chart,title) {
+              /*
+              Takes filtered statistics dataset, a HTML element used as a container to store the bar chart and a chart title as input and draws a bar chart.
+              */
+             
+              // chart width and bar width
+              var width = 420,
+                  barHeight = 25;
+
+              // get the range of a statistic over all modes of transport; used for proper x-axis range definition    
+              let allStats = new CollectAll(inOutData,false,type);  
+              allStats.execute();
+              var statArray = allStats.stats.map(function(d) {return d/STATS_MAPPING[type]["factor"]});
+              
+              // define x-axis
+              var x = d3.scale.linear()
+                  .domain([0, d3.max(statArray)])
+                  .range([0,300]);
+
+              var xAxis = d3.svg.axis()
+                  .tickFormat(d3.format("d"))
+                  .scale(x)
+                  .orient("bottom");    
+                  
+              
+              // data join; add statistic values for each mode of transport                           
+              var barChart = chart.select(".bar.chart")
+                                  .selectAll("rect")
+                                  .data(data, function(d){return d.id});
+                                             
+              barChart.exit().remove();
+
+              barChart.enter().append("rect")
+                  .attr("transform", function(d, i) { return "translate(0," + i * barHeight + ")"; })
+                  .attr("width", function(d){return x(d["value"])})
+                  .attr("height", barHeight - 1);
+
+              // data join; add name of each mode of transport next to the cognate bar  
+              var barChartText = chart.select(".bar.chart")
+                                      .selectAll("text")
+                                      .data(data, function(d){return d["id"];})
+                
+              barChartText.exit().remove();     
+                                      
+              barChartText.enter().append("text")
+                  .attr("transform", function(d, i) { return "translate(0," + i * barHeight + ")"; })
+                  .attr("x", function(d) { return  - 60; })
+                  .attr("y", barHeight / 2)
+                  .attr("dy", ".3em")
+                  .text(function(d) { return d.name; }); 
+                
+              // add title to bar chart
+              var barChartTitle = chart.select("g.x.axis")
+                                       .selectAll("text")
+                                       .data([{"name":title}]); 
+                                      
+              var titleOffset = -(2*data.length); 
+                                         
+              barChartTitle
+                .enter().append("text")
+                .attr("y", titleOffset.toString()+"em")
+                .style("text-anchor", "left")
+                .style("font-size", "16px")
+                .text(function(d) { return d.name;});
+
+              //append an axis object to chart container  
+              var barChartAxis = chart.select("g.x.axis")
+              var axisOffset = barHeight*data.length
+              barChartAxis.attr("transform", function(d, i) { return "translate(0," + axisOffset + ")"; })
+                          .call(xAxis);  
+
+              };
+
+            // filter data and invoke plotting  
+            var dataDistance = filterData(timeslotStats, "distance", timeframe);
+            var dataDuration = filterData(timeslotStats, "duration", timeframe);
+            var dataMode = filterData(timeslotStats, "mode_count", timeframe);
+            
+            plot(dataDistance,"distance",chart_1,"Distance travelled per transport mode (km)");
+            plot(dataDuration,"duration",chart_2, "Time travelled per transport mode (h)");
+            plot(dataMode,"mode_count",chart_3, "Number of trajectories per transport mode");
+            
+            };
+              
+          
+          // load the main dataset containing for each day of the week district-specific information on routes origin-destination as well as information on statistics
+          //d3.json("in_out_Oktoberfest_timeslots_district_resolution_incl_stats_big_set_refactored_2.json", time_select)
+          d3.json("in_out_Oktoberfest_timeslots_district_resolution_incl_stats_big_set_english_refactored.json", timeSelect)
+
+              function timeSelect(inOutData) {
+                /*
+                Takes the main dataset containing information on routes origin-destination and statistics. Invokes updating of the geojson input, sets the coloring function
+                for the heat map and adds a timescale element with buttons to select a day of interest. After selecting a day of interest the heat map is updated accordingly.
+                Also initiates drawing of bar charts displaying statistics for a day of interest.
+
+                in_out_data: main dataset containing for each day of the week district-specific information on routes origin-destination as well as information on statistics (object)
+                */
+
+                    debugger;
+                    // set type of flow radio button to inflow; relevant for appropriate setting of the coloring function
+                    document.getElementById('in').checked=true;
+                    var radioState = getRadioState();
+
+                     
+   
+                    // set aggregated heatmap coloring function; for a given type of flow, aggregated district-specific values over all days of week are used to
+                    // define the min and max value for the heat map function  
+                    var coloring = colorGradient(inOutData,radioState,all=true);  
+                    var weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+                    
+                    // iterate over the weekdays and display the cognate heatmap (with respect to flow type selected)
+                    var idx = 0;
+                    var weekdayInterval = setInterval(function() {
+                        update(inOutData, weekdays[idx],coloring)   
+                        bar_plot(inOutData, weekdays[idx])  
+                            
+
+                        idx++;
+                        if(idx >= weekdays.length) {
+                          clearInterval(weekdayInterval);
+
+                          // add timescale buttons to select day of interest
+                          var buttons = d3.select("body")
+                            .append("div")
+                            .attr("class", "timescale")
+                            .selectAll("div")
+                            .data(weekdays) // ADD BUTTONS FOR EACH DAY
+                            .enter()
+                            .append("div")
+                            .text(function(d) {return d});
+
+                          // set "Sunday" button as selected (changed coloring)  
+                          d3.select(".timescale").selectAll("div")
+                                           .filter(function() {return d3.select(this).text()=="Sunday"})  
+                                           .style("background", "lightBlue")
+                                           .style("color", "white");  
+
+                          // initiate updating of the heat map according to a day selected and type of flow selected                 
+                          buttons.on("click", function(d) {
+                          var radioState = getRadioState();
+                          
+
+                          if(document.getElementById("changeToggle").value=="ON"){
+                            var coloring = colorGradient(inOutData,radioState,all=true) 
+                          };
+                           
+                          d3.select(".timescale")
+                            .selectAll("div")
+                            .transition()
+                            .duration(500)
+                            .style("background", "rgb(251,201,127)")
+                            .style("color", "black");
+
+                          d3.select(this)
+                            .transition()
+                            .duration(500)
+                            .style("background", "lightBlue")
+                            .style("color", "white");
+
+                          //update according to selected timeframe
+                          bar_plot(inOutData, d)  
+                          update(inOutData,d,coloring)
+                          });                 
+                        };
+                      }, 1000);
+              };
+
+
+             
+
+              function update(inOutData, timeframe, defaultColoring) {
+                /*
+                Takes the main dataset containing information on routes origin-destination, selected day of interest and the coloring function. 
+                Updates the geojson dataset to store the inflow, outflow and local routes flow information with respect to the weekday selected. 
+
+                in_out_data: main dataset containing for each day of the week district-specific information on routes origin-destination as well as information on statistics (object)
+                timeframe: selected day of interest (string)   
+                default_coloring: aggregated heat map coloring function (function)
+                */
+
+                var aggregatedTotal = {"Monday":{}, "Tuesday":{}, "Wednesday":{},
+                                       "Thursday":{}, "Friday":{}, "Saturday":{}, "Sunday":{}};
+                // aggregate inflow, outflow and local type of flow for each district and each weekday; used for proper tooltip display                         
+                for(day of Object.keys(inOutData)){
+                  for(name of Object.keys(inOutData[day]["flow"])) {
+                    var aggregation = aggregate(inOutData[day]["flow"][name]);
+                    aggregatedTotal[day][name] = {"in":aggregation[0], "out":aggregation[1], "local":aggregation[2]}
+                    };
+                };
+                
+                // subset for the weekday of interest
+                inOutDataSelected = inOutData[timeframe]["flow"];
+
+                var radioState = getRadioState()   
+                // define header to display what type of data is visualized
+                HEADER_MAPPING = {"in": "Aggregated inflow", "out": "Aggregated outflow", "local": "Local Routes"}; 
+                header = HEADER_MAPPING[radioState] + " on " + timeframe;   
+                         
+                //for the type of flow selected aggregate flow values for each district; required to change type of heat map (from aggregated to selected)
+                var aggregated = processDistricts(inOutDataSelected,radioState,aggregate);
+                
+                // change coloring function from aggregated to selected
+                if(document.getElementById("changeToggle").value=="OFF"){
+                        defaultColoring = colorGradient(aggregated,all=false)
+                };
+                
+                // update geojson data to store information on flow frequencies
+                for(var i=0; i < geojson.features.length; i++) {
+                  
+                  var name = geojson.features[i].properties.name;
+                  var inOutAggregated = aggregate(inOutDataSelected[name]);
+                  
+                  geojson.features[i].properties["in"] = inOutAggregated[0];
+                  geojson.features[i].properties["out"] = inOutAggregated[1];
+                  geojson.features[i].properties["local"] = inOutAggregated[2];
+                  
+                };
+
+                // make a deep copy of the aggregated dataset, which can be used to roll back to default values, e.g after changing timeframe and state of flow
+                var defaultGeojson = $.extend(true, {}, geojson);  
+                // draw heat map
+                draw(defaultColoring, radioState);  
+
+                // invoke selector to change type of flow data 
+                var dataDim = d3.selectAll("input");
+                dataDim.on("change", function(d) {
+                  // get selected type of flow data
+                  var radioState = getRadioState();  
+                  // update header
+                  header = HEADER_MAPPING[radioState] + " on " + timeframe   
+
+                  // update aggregate flow values for each district for the type of flow selected;
+                  var aggregated = processDistricts(inOutDataSelected,radioState,aggregate);
+                  
+                  // change coloring function from aggregated to selected
+                  if(document.getElementById("changeToggle").value=="OFF"){
+                        coloring = colorGradient(aggregated,all=false)
+                        
+                  }else if(document.getElementById("changeToggle").value=="ON"){
+                        coloring = colorGradient(inOutData,radioState,all=true); 
+                      };
+   
+                  // draw heat map
+                  draw(coloring,radioState)  
+                });
+                
+                // offset variable for proper tooltip display
+                var offsetL = document.getElementById('container').offsetLeft+20;
+                var offsetT = document.getElementById('container').offsetTop+10; 
+                var isClicked = false;
+                var distSelected = null 
+                
+              // define different mouse events; required to display tooltip and to switch into district-selected heat map mode
+              d3.selectAll("path")
+
+                 .on("mousemove", function(d,i) {
+                  // define rules for tooltip display; display tooltip for all districts but the selected one if in selected heat map mode
+                  if(d.properties.name == distSelected && isClicked) {
+                    tooltip.classed("hidden", true);
+                  }else{
+
+                    var radioState = getRadioState();   
+                    if(!isClicked){
+                      // set tag for display in tooltip
+                      tag = "<b>" + d.properties.name + "</b><br/>" + "<br>" + "IN: " +aggregatedTotal[timeframe][d.properties.name].in + "<br>" + "OUT: " +aggregatedTotal[timeframe][d.properties.name].out +"<br>" + "LOCAL: " +aggregatedTotal[timeframe][d.properties.name].local;
+                    } else {
+                      tag = "<b>" + d.properties.name + "</b><br/>" + "<br>" + radioState+": " + OD_forSelected[d.properties.name];
+                    }
+                      // use mouse coordinates to show tooltip over the entire selected district                      
+                      var coords = d3.mouse(this);
+                      tooltip.classed("hidden", false)
+                             .attr("style", "left:"+(coords[0]+offsetL)+"px;top:"+(coords[1]+offsetT)+"px")
+                             .html(tag);
+                  };
+                 }) 
+
+                 .on("mouseover", function(d) {
+                  
+                  if(d.properties.name == distSelected && isClicked) {
+                    tooltip.classed("hidden", true);
+                  }else{
+                    var radioState = getRadioState();   
+                    if(!isClicked){
+                      
+                      tag = "<b>" + d.properties.name + "</b><br/>" + "<br>" + "IN: " +aggregatedTotal[timeframe][d.properties.name].in + "<br>" + "OUT: " +aggregatedTotal[timeframe][d.properties.name].out +"<br>" + "LOCAL: " +aggregatedTotal[timeframe][d.properties.name].local;
+                    } else {
+                      tag = "<b>" + d.properties.name + "</b><br/>" + "<br>" + radioState+": " + OD_forSelected[d.properties.name];
+
+                    };
+
+                    var coords = d3.mouse(this);
+                    tooltip.classed("hidden", false)
+                           .attr("style", "left:"+(coords[0]+offsetL)+"px;top:"+(coords[1]+offsetT)+"px")
+                           .html(tag)
+  
+                    if(!isClicked){  
+                     d3.select(this)
+                       .transition()
+                       .style("stroke", "black")
+                       .style("stroke-width", 5)
+                    };        
+                  }; 
+                 })   
+                       
+                 .on("mouseout", function(d,i) {
+                   // hide tooltip if moving out of district 
+                   if(!isClicked ){
+                   tooltip.classed("hidden", true);  
+                   
+                   d3.selectAll("path")
+                     .style("stroke", "black")
+                     .style("stroke-width", 0.5)  
+                   };  
+                 })
+
+                 .on("click", function(d) {
+                  // invoke selected heat map mode; displays heat map with respect to selected district (inflow vs. outflow in,from selected district)
+                  var radioState = getRadioState()  
+                  // allow clickable actions only if in INFLOW or OUTFLOW mode 
+                  if(radioState != "local") {
+
+                    var TOOLTIP_MAPPING = {"in_freq":"in", "out_freq":"out"};  
+                    tooltip.classed("hidden", true);  
+                    isClicked = !isClicked;
+                    distSelected = d.properties.name;
+
+                    // set OD_forSelected; relevant to display selected type of flow for selected district when clicked on district 
+                    OD_forSelected = inOutDataSelected[distSelected][radioState];
+                    var coloringDistrictSpecific = colorGradient(inOutDataSelected[distSelected][radioState]);
+
+                    if(isClicked){
+                        for(var i=0; i < geojson.features.length; i++) {
+                          name = geojson.features[i].properties.name;
+                          geojson.features[i].properties[radioState] = OD_forSelected[name];
+                        };
+
+                    d3.selectAll("#dimensions").style("opacity",0);
+                    var CLICKED_HEADER_MAPPING = {"in":"Inflow into", "out":"Outflow from"};
+                    header = CLICKED_HEADER_MAPPING[radioState]+" "+distSelected; 
+                              
+                    draw(coloringDistrictSpecific,radioState,distSelected)  
+                    }; 
+                    
+                    if(!isClicked) {
+                      // role back to default frequency settings (aggregated) 
+                      for(var i=0; i < geojson.features.length; i++) {
+                          geojson.features[i].properties[radioState] = defaultGeojson.features[i].properties[radioState]
+                        }
+  
+                    d3.selectAll("#dimensions").style("opacity",1)
+
+                    var UNCLICKED_HEADER_MAPPING = {"in":"inflow", "out":"outflow"}
+                    header = "Aggregated " + UNCLICKED_HEADER_MAPPING[radioState];   
+
+                    draw(defaultColoring,radioState)     
+                    };
+                  
+                  };
+
+                 });
+            };
+            
+
+          };
+         
+    </script>
+</head>
+<body>
+
+  
+  <form id="dimensions">
+      <input  type='radio' id="in" name="mode" value="in">Inflow</input>
+      <input type='radio' id="out" name="mode" value="out">Outflow</input> 
+      <input type='radio' id="local" name="mode" value="local">Local</input> 
+  </form>
+
+
+  <button id ="changeToggle" onclick="toggle(this)" style="background:green" value="ON">ON</button>
+
+  <div id="container"></div>
+
+  <div class="header" id="myHeader">
+    <h3>Aggregated Heatmap</h3>
+  </div>
+  
+  
+  
+  <script type="text/javascript">
+
+    
+    // define canvas size
+    "use strict";
+    var width = 1600,
+        height = 900,
+        margin = 75;
+
+    // define tooltip           
+    var tooltip = d3.select("#container").append("div").attr("class", "tooltip hidden");
+                    
+                
+    // create svg element 
+    var svg = d3.select("body")
+                .append("svg")
+                .attr("width", width)
+                .attr("height", height)
+                .append("g")
+                .attr("class", "map")
+        
+    // set main header 
+    d3.select("body")
+              .append("h1")
+              .text("Visitor Inflow and Outflow during Oktoberfest 2017 in Munich");            
+
+    // set the header
+    d3.select("body")
+              .append("h2")
+              .text("");   
+
+
+    // define a container for the bar chart; makes placement on canvas easier via transformation of the entire container    
+    var chart_1 = d3.select("svg")
+                    .append("g")
+                    .attr("class", "bar container")
+                    .attr("transform", function(d, i) { return "translate(1250," + 100 + ")"; })
+                    
+
+    var chart_2 = d3.select("svg")
+                    .append("g")
+                    .attr("class", "bar container")
+                    .attr("transform", function(d, i) { return "translate(1250," + 400 + ")"; });  
+
+    var chart_3 = d3.select("svg")
+                    .append("g")
+                    .attr("class", "bar container")
+                    .attr("transform", function(d, i) { return "translate(1250," + 700 + ")"; });   
+
+
+    chart_1.append("g")
+                  .attr("class", "x axis");
+
+    chart_1.append("g")
+                  .attr("class", "bar chart");                
+                  
+                   
+    chart_2.append("g")
+                  .attr("class", "x axis")
+
+    chart_2.append("g")
+                  .attr("class", "bar chart");                       
+                  
+
+    chart_3.append("g")
+                  .attr("class", "x axis") 
+    chart_3.append("g")
+                  .attr("class", "bar chart");                        
+
+    // transform/project lat,long coordinates to x,y coordinats           
+    var projection = d3.geo.albers() // transformator
+                               .center([11.5878414, 48.1331509])
+                               .rotate([-11.5878414,-48.1331509])
+                               .scale(198000) // zoom into map
+                               .translate([27600, -161870]); // position map on x,y axis
+                               
+
+    // load the geojson data and invoke drawing of the map and heat map, respectively                               
+    d3.json("munich_districts_airport_cleaned_english.geojson", updateFile);
+
+
+  </script>
+</body>
+</html>
+
+
